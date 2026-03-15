@@ -2,6 +2,7 @@ import { loadDotEnv } from "./src/utils/envLoader.js";
 import { getEnv } from "./src/config/env.js";
 import { ensureApiKeys } from "./src/core/bootstrap.js";
 import { TradingSystem } from "./src/core/tradingSystem.js";
+import { Agent } from "./Agent.js";
 import { logger } from "./src/utils/logger.js";
 
 async function main() {
@@ -15,11 +16,20 @@ async function main() {
   // Reload env after optional interactive key input.
   env = getEnv();
 
-  const system = new TradingSystem(env);
+  const agent = new Agent({
+    openAiApiKey: env.openAiApiKey,
+    httpPort: env.agentHttpPort,
+  });
+
+  const system = new TradingSystem(env, agent);
+  agent.attach(system);
+  agent.startHttpServer();
+
   await system.start();
 
   process.on("SIGINT", () => {
     logger.info("Shutting down...");
+    agent.stopHttpServer();
     system.stop();
     process.exit(0);
   });
