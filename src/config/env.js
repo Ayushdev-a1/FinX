@@ -27,5 +27,9 @@ export function getEnv() {
     // Broker
     zerodhaApiKey: process.env.ZERODHA_API_KEY || "",
     zerodhaAccessToken: process.env.ZERODHA_ACCESS_TOKEN || "",
+
+    // AI Agent
+    openAiApiKey: process.env.OPENAI_API_KEY || "",
+    agentHttpPort: process.env.AGENT_HTTP_PORT ? Number(process.env.AGENT_HTTP_PORT) : null,
   };
 }

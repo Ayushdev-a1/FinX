@@ -10,8 +10,9 @@ import { Monitor } from "../layers/monitoring/monitor.js";
 import { logger } from "../utils/logger.js";
 
 export class TradingSystem {
-  constructor(env) {
+  constructor(env, agent = null) {
     this.env = env;
+    this.agent = agent;
     this.pipeline = new DataPipeline();
     this.strategy = new StrategyEngine();
     this.portfolio = new PortfolioEngine({
@@ -49,7 +50,12 @@ export class TradingSystem {
         features,
       });
 
-      const order = this.portfolio.computeOrder(signal, tick.price, this.lastPrices);
+      // Optionally enhance the signal through the AI agent.
+      const enhancedSignal = this.agent
+        ? await this.agent.analyzeSignal({ symbol: tick.symbol, price: tick.price, features, signal })
+        : signal;
+
+      const order = this.portfolio.computeOrder(enhancedSignal, tick.price, this.lastPrices);
       if (!order) continue;
 
       this.monitor.onOrderAttempt();
