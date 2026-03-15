@@ -1,5 +1,20 @@
 import { logger } from "../../utils/logger.js";
 
+/**
+ * Check if a symbol is an Indian stock (NSE or BSE).
+ * NSE symbols end with .NS, BSE symbols end with .BO
+ */
+function isIndianSymbol(symbol) {
+  return symbol.endsWith(".NS") || symbol.endsWith(".BO");
+}
+
+/**
+ * Check if any symbol in the list is an Indian stock.
+ */
+function containsIndianSymbols(symbols) {
+  return symbols.some(isIndianSymbol);
+}
+
 export class MockMarketDataProvider {
   constructor(symbols) {
     this.symbols = symbols;
@@ -27,6 +42,62 @@ export class MockMarketDataProvider {
         volume,
       };
     });
+  }
+}
+
+/**
+ * Yahoo Finance provider for market data.
+ * Supports Indian stocks (.NS, .BO) and US stocks.
+ * Uses the free Yahoo Finance API via query endpoints.
+ */
+export class YahooFinanceProvider {
+  constructor(symbols) {
+    this.symbols = symbols;
+    this.fallback = new MockMarketDataProvider(symbols);
+  }
+
+  async getSnapshot() {
+    try {
+      const snapshots = [];
+      for (const symbol of this.symbols) {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d`;
+        const res = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          }
+        });
+        
+        if (!res.ok) {
+          throw new Error(`Yahoo Finance request failed for ${symbol}: ${res.status}`);
+        }
+        
+        const json = await res.json();
+        const result = json?.chart?.result?.[0];
+        const meta = result?.meta;
+        
+        if (!meta || !meta.regularMarketPrice) {
+          throw new Error(`No Yahoo Finance data for ${symbol}`);
+        }
+
+        const price = meta.regularMarketPrice;
+        const volume = meta.regularMarketVolume || 0;
+        const dayHigh = meta.regularMarketDayHigh || price;
+        const dayLow = meta.regularMarketDayLow || price;
+
+        snapshots.push({
+          symbol,
+          timestamp: Date.now(),
+          price,
+          bid: dayLow,
+          ask: dayHigh,
+          volume,
+        });
+      }
+      return snapshots;
+    } catch (err) {
+      logger.warn(`Yahoo Finance provider failed, falling back to mock data: ${err?.message || err}`);
+      return this.fallback.getSnapshot();
+    }
   }
 }
 
@@ -68,11 +139,21 @@ export class PolygonMarketDataProvider {
 }
 
 export function buildMarketDataProvider(env) {
+  const symbols = env.symbols;
+  
+  // For Indian stocks (.NS, .BO), use Yahoo Finance as it supports them
+  // Polygon.io does not support Indian stock exchanges
+  if (containsIndianSymbols(symbols)) {
+    logger.info("Detected Indian stocks, using Yahoo Finance market data provider.");
+    return new YahooFinanceProvider(symbols);
+  }
+  
+  // For US stocks, prefer Polygon if API key is available
   if (env.polygonApiKey) {
     logger.info("Using Polygon market data provider.");
-    return new PolygonMarketDataProvider(env.polygonApiKey, env.symbols);
+    return new PolygonMarketDataProvider(env.polygonApiKey, symbols);
   }
 
-  logger.warn("POLYGON_API_KEY missing, using mock market data provider.");
-  return new MockMarketDataProvider(env.symbols);
+  logger.warn("No market data API configured, using mock market data provider.");
+  return new MockMarketDataProvider(symbols);
 }
