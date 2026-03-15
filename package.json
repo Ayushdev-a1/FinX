@@ -12,8 +12,8 @@
     "test": "node --test --test-concurrency=1 tests/*.test.js"
   },
   "dependencies": {
-    "express": "^5.2.1",
-    "openai": "^6.29.0"
+    "@google/generative-ai": "^0.24.1",
+    "express": "^5.2.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

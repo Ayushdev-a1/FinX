@@ -8,6 +8,7 @@ import { loadDotEnv } from "../src/utils/envLoader.js";
 import { getEnv } from "../src/config/env.js";
 import { runBacktest } from "../src/layers/backtest/backtester.js";
 import { TradingSystem } from "../src/core/tradingSystem.js";
+import { Agent } from "../Agent.js";
 
 test("loadDotEnv hydrates config values from a file", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-env-"));
@@ -19,7 +20,7 @@ test("loadDotEnv hydrates config values from a file", () => {
       "TRADING_MODE=paper",
       "SYMBOLS=AAA,BBB",
       "POLL_INTERVAL_MS=5000",
-      'OPENAI_API_KEY="test-key"',
+      'GEMINI_API_KEY="test-key"',
     ].join("\n"),
   );
 
@@ -28,7 +29,7 @@ test("loadDotEnv hydrates config values from a file", () => {
     delete process.env.TRADING_MODE;
     delete process.env.SYMBOLS;
     delete process.env.POLL_INTERVAL_MS;
-    delete process.env.OPENAI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
 
     loadDotEnv(envFile);
     const env = getEnv();
@@ -36,7 +37,7 @@ test("loadDotEnv hydrates config values from a file", () => {
     assert.equal(env.tradingMode, "paper");
     assert.deepEqual(env.symbols, ["AAA", "BBB"]);
     assert.equal(env.pollIntervalMs, 5000);
-    assert.equal(env.openAiApiKey, "test-key");
+    assert.equal(env.geminiApiKey, "test-key");
   } finally {
     process.env = originalEnv;
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -84,7 +85,7 @@ test("TradingSystem.cycle processes a paper trade end-to-end", async () => {
     newsApiKey: "",
     zerodhaApiKey: "",
     zerodhaAccessToken: "",
-    openAiApiKey: "",
+    geminiApiKey: "",
     agentHttpPort: null,
   };
 
@@ -139,4 +140,48 @@ test("TradingSystem.cycle processes a paper trade end-to-end", async () => {
   assert.ok(position.qty > 0);
   assert.ok(system.portfolio.cash < env.initialCapital);
   assert.equal(system.lastPrices.get("TEST.NS"), 200);
+});
+
+test("Agent tracks decision history and provides getDecisionHistory", () => {
+  const agent = new Agent({ httpPort: null });
+
+  // Manually track decisions without AI
+  agent._trackDecision({
+    timestamp: "2024-01-15T10:00:00.000Z",
+    symbol: "TEST.NS",
+    price: 100,
+    features: { rsi: 50, macd: 0.5, ma50: 98, ma200: 95 },
+    originalSignal: { direction: "BUY", confidence: 0.7, score: 0.8 },
+    aiAction: "CONFIRM",
+    aiReason: "Strong trend",
+    aiConfidence: 0.8,
+    finalSignal: { direction: "BUY", confidence: 0.7 },
+  });
+
+  agent._trackDecision({
+    timestamp: "2024-01-15T10:05:00.000Z",
+    symbol: "RELIANCE.NS",
+    price: 2500,
+    features: { rsi: 75, macd: -0.3, ma50: 2510, ma200: 2400 },
+    originalSignal: { direction: "SELL", confidence: 0.6, score: -0.7 },
+    aiAction: "DOWNGRADE",
+    aiReason: "Conflicting signals",
+    aiConfidence: 0.3,
+    finalSignal: { direction: "SELL", confidence: 0.3 },
+  });
+
+  const history = agent.getDecisionHistory(10);
+  assert.equal(history.length, 2);
+  // Most recent first
+  assert.equal(history[0].symbol, "RELIANCE.NS");
+  assert.equal(history[1].symbol, "TEST.NS");
+  assert.equal(history[0].aiAction, "DOWNGRADE");
+  assert.equal(history[1].aiAction, "CONFIRM");
+});
+
+test("Agent initializes without Gemini API key (AI disabled)", () => {
+  const agent = new Agent({ httpPort: null });
+  assert.equal(agent.geminiModel, null);
+  assert.equal(agent.genAI, null);
+  assert.deepEqual(agent.decisionHistory, []);
 });
