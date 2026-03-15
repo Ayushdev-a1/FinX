@@ -27,6 +27,7 @@ export class TradingSystem {
     this.lastPrices = new Map();
     this.timer = null;
     this.isWarmedUp = false;
+    this.symbolsWarmedUp = new Set(); // Track per-symbol warm-up status
   }
 
   /**
@@ -103,17 +104,22 @@ export class TradingSystem {
       this.lastPrices.set(tick.symbol, tick.price);
       const candles = this.pipeline.computeOhlc(tick.symbol, 60_000, 300);
       if (candles.length < 210) {
-        // Log warming status periodically (first tick only to avoid spam)
-        if (tick === ticks[0] && !this.isWarmedUp) {
+        // Log warming status once per symbol (not every cycle)
+        if (!this.symbolsWarmedUp.has(tick.symbol)) {
           logger.info(`Warming up: ${tick.symbol} has ${candles.length}/210 candles needed for indicators`);
         }
         continue;
       }
 
-      // Mark as warmed up once we have enough data
+      // Mark this symbol as warmed up (log only once per symbol)
+      if (!this.symbolsWarmedUp.has(tick.symbol)) {
+        this.symbolsWarmedUp.add(tick.symbol);
+        logger.info(`${tick.symbol} warmed up, now generating trading signals`);
+      }
+
+      // Mark system as warmed up once any symbol is ready
       if (!this.isWarmedUp) {
         this.isWarmedUp = true;
-        logger.info(`System warmed up, now generating trading signals`);
       }
 
       const sentiment = await this.news.getSentiment(tick.symbol);

@@ -60,6 +60,7 @@ export class MockMarketDataProvider {
 
       for (let i = count - 1; i >= 0; i--) {
         const timestamp = now - i * intervalMs;
+        // Slight upward bias (0.48 instead of 0.5) to simulate typical long-term market drift
         const drift = (Math.random() - 0.48) * (price * 0.005);
         const open = price;
         const close = Math.max(1, price + drift);
