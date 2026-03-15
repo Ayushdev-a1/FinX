@@ -29,7 +29,7 @@ export function getEnv() {
     zerodhaAccessToken: process.env.ZERODHA_ACCESS_TOKEN || "",
 
     // AI Agent
-    openAiApiKey: process.env.OPENAI_API_KEY || "",
+    geminiApiKey: process.env.GEMINI_API_KEY || "",
     agentHttpPort: process.env.AGENT_HTTP_PORT ? Number(process.env.AGENT_HTTP_PORT) : null,
   };
 }

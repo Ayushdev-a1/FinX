@@ -1,40 +1,53 @@
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import express from "express";
 import { logger } from "./src/utils/logger.js";
 
 /** Factor applied to confidence when the AI downgrades but supplies no value. */
 const DEFAULT_DOWNGRADE_FACTOR = 0.5;
 
-/** Maximum milliseconds to wait for an OpenAI response before falling through. */
-const OPENAI_TIMEOUT_MS = 8_000;
+/** Maximum milliseconds to wait for a Gemini response before falling through. */
+const GEMINI_TIMEOUT_MS = 8_000;
+
+/** Maximum number of decisions to keep in history for validation/review. */
+const MAX_DECISION_HISTORY = 100;
 
 /**
  * Agent — AI-powered trading assistant.
  *
  * Responsibilities:
- *  1. Optionally enhance trading signals via OpenAI analysis before execution.
+ *  1. Optionally enhance trading signals via Gemini AI analysis before execution.
  *  2. Expose a lightweight HTTP server for live monitoring of positions,
  *     equity, and system metrics (requires AGENT_HTTP_PORT to be set).
+ *  3. Track decision history for validation and review.
  */
 export class Agent {
   /**
    * @param {object}      opts
-   * @param {string}      [opts.openAiApiKey]  - OpenAI API key (enables AI analysis).
-   * @param {string}      [opts.model]         - OpenAI model to use.
+   * @param {string}      [opts.geminiApiKey]  - Gemini API key (enables AI analysis).
+   * @param {string}      [opts.model]         - Gemini model to use.
    * @param {number|null} [opts.httpPort]      - Port for the monitoring HTTP server.
    */
-  constructor({ openAiApiKey = "", model = "gpt-4o-mini", httpPort = null } = {}) {
+  constructor({ geminiApiKey = "", model = "gemini-1.5-flash", httpPort = null } = {}) {
     this.model = model;
     this.httpPort = httpPort;
     this.tradingSystem = null;
     this.server = null;
+    this.decisionHistory = [];
 
-    if (openAiApiKey) {
-      this.openai = new OpenAI({ apiKey: openAiApiKey });
-      logger.info("Agent: OpenAI client initialised.");
+    if (geminiApiKey) {
+      this.genAI = new GoogleGenerativeAI(geminiApiKey);
+      this.geminiModel = this.genAI.getGenerativeModel({
+        model: this.model,
+        generationConfig: {
+          maxOutputTokens: 150,
+          temperature: 0.2,
+        },
+      });
+      logger.info("Agent: Gemini AI client initialised.");
     } else {
-      this.openai = null;
-      logger.warn("Agent: OPENAI_API_KEY not set — AI signal analysis disabled.");
+      this.genAI = null;
+      this.geminiModel = null;
+      logger.warn("Agent: GEMINI_API_KEY not set — AI signal analysis disabled.");
     }
   }
 
@@ -49,8 +62,8 @@ export class Agent {
   }
 
   /**
-   * Analyse a proposed trading signal using OpenAI and return a (possibly
-   * modified) signal.  Falls through to the original signal when OpenAI is
+   * Analyse a proposed trading signal using Gemini AI and return a (possibly
+   * modified) signal.  Falls through to the original signal when Gemini is
    * unavailable, the call times out, or any error occurs.
    *
    * Possible agent actions:
@@ -66,7 +79,7 @@ export class Agent {
    * @returns {Promise<object>} Enhanced signal object.
    */
   async analyzeSignal({ symbol, price, features, signal }) {
-    if (!this.openai) return signal;
+    if (!this.geminiModel) return signal;
 
     const fmt = (v, d = 2) => (v != null ? Number(v).toFixed(d) : "N/A");
 
@@ -93,29 +106,27 @@ export class Agent {
     ].join("\n");
 
     const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("OpenAI request timed out")), OPENAI_TIMEOUT_MS),
+      setTimeout(() => reject(new Error("Gemini request timed out")), GEMINI_TIMEOUT_MS),
     );
 
     try {
       const response = await Promise.race([
-        this.openai.chat.completions.create({
-          model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 120,
-          temperature: 0.2,
-        }),
+        this.geminiModel.generateContent(prompt),
         timeout,
       ]);
 
-      const text = response.choices[0]?.message?.content?.trim() || "{}";
-      const parsed = JSON.parse(text);
+      const responseText = response.response?.text?.() || "";
+      const text = responseText.trim() || "{}";
+      // Remove any markdown code block wrappers if present
+      const cleanText = text.replace(/^```json\s*|\s*```$/g, "").trim();
+      const parsed = JSON.parse(cleanText);
+
+      let enhancedSignal;
 
       if (parsed.action === "VETO") {
         logger.info("Agent vetoed signal", { symbol, reason: parsed.reason });
-        return { ...signal, direction: "HOLD", confidence: 0, agentAction: "VETO", agentReason: parsed.reason };
-      }
-
-      if (parsed.action === "DOWNGRADE") {
+        enhancedSignal = { ...signal, direction: "HOLD", confidence: 0, agentAction: "VETO", agentReason: parsed.reason };
+      } else if (parsed.action === "DOWNGRADE") {
         const newConf = Math.min(
           signal.confidence,
           parsed.confidence ?? signal.confidence * DEFAULT_DOWNGRADE_FACTOR,
@@ -126,19 +137,54 @@ export class Agent {
           to: Number(newConf.toFixed(3)),
           reason: parsed.reason,
         });
-        return {
+        enhancedSignal = {
           ...signal,
           confidence: Number(newConf.toFixed(3)),
           agentAction: "DOWNGRADE",
           agentReason: parsed.reason,
         };
+      } else {
+        enhancedSignal = { ...signal, agentAction: "CONFIRM", agentReason: parsed.reason };
       }
 
-      return { ...signal, agentAction: "CONFIRM", agentReason: parsed.reason };
+      // Track decision for validation
+      this._trackDecision({
+        timestamp: new Date().toISOString(),
+        symbol,
+        price,
+        features,
+        originalSignal: signal,
+        aiAction: parsed.action || "CONFIRM",
+        aiReason: parsed.reason || "No reason provided",
+        aiConfidence: parsed.confidence,
+        finalSignal: enhancedSignal,
+      });
+
+      return enhancedSignal;
     } catch (err) {
-      logger.warn("Agent: OpenAI analysis failed — using original signal.", { error: err?.message || err });
+      logger.warn("Agent: Gemini analysis failed — using original signal.", { error: err?.message || err });
       return signal;
     }
+  }
+
+  /**
+   * Track a decision for validation and review.
+   * @private
+   */
+  _trackDecision(decision) {
+    this.decisionHistory.push(decision);
+    if (this.decisionHistory.length > MAX_DECISION_HISTORY) {
+      this.decisionHistory.shift();
+    }
+  }
+
+  /**
+   * Get recent decisions for validation.
+   * @param {number} limit - Maximum number of decisions to return.
+   * @returns {Array} Recent decisions.
+   */
+  getDecisionHistory(limit = 20) {
+    return this.decisionHistory.slice(-limit).reverse();
   }
 
   /**
@@ -183,6 +229,58 @@ export class Agent {
         return res.status(503).json({ error: "Trading system not attached." });
       }
       res.json(this.tradingSystem.monitor.metrics);
+    });
+
+    /**
+     * GET /decisions — View recent AI decisions for validation.
+     * Query params:
+     *   - limit: Number of recent decisions to return (default: 20, max: 100)
+     *
+     * This endpoint helps users verify bot decisions by showing:
+     *   - Original signal from strategy engine
+     *   - AI's action (CONFIRM/DOWNGRADE/VETO)
+     *   - AI's reasoning
+     *   - Final signal used for trading
+     *   - All market data that influenced the decision
+     */
+    app.get("/decisions", (req, res) => {
+      const limit = Math.min(Math.max(1, Number(req.query.limit) || 20), MAX_DECISION_HISTORY);
+      const decisions = this.getDecisionHistory(limit);
+
+      res.json({
+        count: decisions.length,
+        total: this.decisionHistory.length,
+        aiEnabled: !!this.geminiModel,
+        decisions: decisions.map((d) => ({
+          timestamp: d.timestamp,
+          symbol: d.symbol,
+          price: d.price,
+          indicators: {
+            rsi: d.features.rsi,
+            macd: d.features.macd,
+            ma50: d.features.ma50,
+            ma200: d.features.ma200,
+            bollingerUpper: d.features.bollingerUpper,
+            bollingerLower: d.features.bollingerLower,
+            atr: d.features.atr,
+            sentimentScore: d.features.sentimentScore,
+          },
+          originalSignal: {
+            direction: d.originalSignal.direction,
+            confidence: d.originalSignal.confidence,
+            score: d.originalSignal.score,
+          },
+          aiDecision: {
+            action: d.aiAction,
+            reason: d.aiReason,
+            confidence: d.aiConfidence,
+          },
+          finalSignal: {
+            direction: d.finalSignal.direction,
+            confidence: d.finalSignal.confidence,
+          },
+        })),
+      });
     });
 
     this.server = app.listen(this.httpPort, (err) => {
