@@ -43,6 +43,40 @@ export class MockMarketDataProvider {
       };
     });
   }
+
+  /**
+   * Generate mock historical candles for bootstrapping.
+   * @param {number} count - Number of candles to generate per symbol
+   * @returns {Promise<Map<string, Array>>} Map of symbol to candle array
+   */
+  async getHistoricalCandles(count = 250) {
+    const result = new Map();
+    const now = Date.now();
+    const intervalMs = 60_000; // 1 minute candles
+
+    for (const symbol of this.symbols) {
+      const candles = [];
+      let price = this.state.get(symbol) || 100;
+
+      for (let i = count - 1; i >= 0; i--) {
+        const timestamp = now - i * intervalMs;
+        const drift = (Math.random() - 0.48) * (price * 0.005);
+        const open = price;
+        const close = Math.max(1, price + drift);
+        const high = Math.max(open, close) * (1 + Math.random() * 0.002);
+        const low = Math.min(open, close) * (1 - Math.random() * 0.002);
+        const volume = Math.floor(50_000 + Math.random() * 150_000);
+
+        candles.push({ timestamp, open, high, low, close, volume });
+        price = close;
+      }
+
+      this.state.set(symbol, price);
+      result.set(symbol, candles);
+    }
+
+    return result;
+  }
 }
 
 /**
@@ -99,6 +133,67 @@ export class YahooFinanceProvider {
       return this.fallback.getSnapshot();
     }
   }
+
+  /**
+   * Fetch historical candle data from Yahoo Finance for bootstrapping indicators.
+   * Fetches 5-day 1-minute data to ensure we have enough for MA200.
+   * @returns {Promise<Map<string, Array>>} Map of symbol to candle array
+   */
+  async getHistoricalCandles() {
+    const result = new Map();
+
+    for (const symbol of this.symbols) {
+      try {
+        // Fetch 5 days of 1-minute data (Yahoo allows up to 7 days for 1m interval)
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=5d`;
+        const res = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          }
+        });
+
+        if (!res.ok) {
+          throw new Error(`Yahoo Finance historical request failed for ${symbol}: ${res.status}`);
+        }
+
+        const json = await res.json();
+        const chartResult = json?.chart?.result?.[0];
+        
+        if (!chartResult) {
+          throw new Error(`No Yahoo Finance historical data for ${symbol}`);
+        }
+
+        const timestamps = chartResult.timestamp || [];
+        const quotes = chartResult.indicators?.quote?.[0] || {};
+        const { open, high, low, close, volume } = quotes;
+
+        const candles = [];
+        for (let i = 0; i < timestamps.length; i++) {
+          // Skip if any value is null (market closed periods)
+          if (open?.[i] == null || close?.[i] == null) continue;
+
+          candles.push({
+            timestamp: timestamps[i] * 1000, // Convert to milliseconds
+            open: open[i],
+            high: high?.[i] ?? open[i],
+            low: low?.[i] ?? open[i],
+            close: close[i],
+            volume: volume?.[i] ?? 0,
+          });
+        }
+
+        logger.info(`Loaded ${candles.length} historical candles for ${symbol}`);
+        result.set(symbol, candles);
+      } catch (err) {
+        logger.warn(`Failed to fetch historical data for ${symbol}, using mock: ${err?.message || err}`);
+        // Fall back to mock historical data for this symbol
+        const mockCandles = await this.fallback.getHistoricalCandles(250);
+        result.set(symbol, mockCandles.get(symbol) || []);
+      }
+    }
+
+    return result;
+  }
 }
 
 export class PolygonMarketDataProvider {
@@ -135,6 +230,50 @@ export class PolygonMarketDataProvider {
       logger.warn(`Polygon provider failed, falling back to mock data: ${err?.message || err}`);
       return this.fallback.getSnapshot();
     }
+  }
+
+  /**
+   * Fetch historical candle data from Polygon for bootstrapping indicators.
+   * @returns {Promise<Map<string, Array>>} Map of symbol to candle array
+   */
+  async getHistoricalCandles() {
+    const result = new Map();
+    const now = Date.now();
+    const fiveDaysAgo = now - 5 * 24 * 60 * 60 * 1000;
+    const fromDate = new Date(fiveDaysAgo).toISOString().split("T")[0];
+    const toDate = new Date(now).toISOString().split("T")[0];
+
+    for (const symbol of this.symbols) {
+      try {
+        const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}/range/1/minute/${fromDate}/${toDate}?adjusted=true&sort=asc&limit=5000&apiKey=${this.apiKey}`;
+        const res = await fetch(url);
+
+        if (!res.ok) {
+          throw new Error(`Polygon historical request failed for ${symbol}: ${res.status}`);
+        }
+
+        const json = await res.json();
+        const rows = json?.results || [];
+
+        const candles = rows.map((r) => ({
+          timestamp: r.t,
+          open: r.o,
+          high: r.h,
+          low: r.l,
+          close: r.c,
+          volume: r.v,
+        }));
+
+        logger.info(`Loaded ${candles.length} historical candles for ${symbol}`);
+        result.set(symbol, candles);
+      } catch (err) {
+        logger.warn(`Failed to fetch historical data for ${symbol}, using mock: ${err?.message || err}`);
+        const mockCandles = await this.fallback.getHistoricalCandles(250);
+        result.set(symbol, mockCandles.get(symbol) || []);
+      }
+    }
+
+    return result;
   }
 }
 
