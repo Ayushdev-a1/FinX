@@ -23,9 +23,18 @@ The app will ask for missing API keys interactively at startup.
 
 ## API keys
 
-- `POLYGON_API_KEY` (optional, else mock market data)
+- `POLYGON_API_KEY` (optional, for US stocks market data)
 - `NEWS_API_KEY` (optional, else mock sentiment)
 - `ZERODHA_API_KEY` and `ZERODHA_ACCESS_TOKEN` (required only in `TRADING_MODE=live`)
+
+## Market Data Providers
+
+The system automatically selects the appropriate market data provider based on the symbols:
+
+- **Indian stocks** (`.NS` for NSE, `.BO` for BSE): Uses Yahoo Finance (free, no API key required)
+- **US stocks**: Uses Polygon.io if `POLYGON_API_KEY` is set, otherwise falls back to mock data
+
+Note: Polygon.io only supports US stock exchanges. For Indian stocks, the system automatically uses Yahoo Finance.
 
 ## Run backtest sample
 
