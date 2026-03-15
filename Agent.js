@@ -27,7 +27,7 @@ export class Agent {
    * @param {string}      [opts.model]         - Gemini model to use.
    * @param {number|null} [opts.httpPort]      - Port for the monitoring HTTP server.
    */
-  constructor({ geminiApiKey = "", model = "gemini-1.5-flash", httpPort = null } = {}) {
+  constructor({ geminiApiKey = "", model = "gemini-2.0-flash", httpPort = null } = {}) {
     this.model = model;
     this.httpPort = httpPort;
     this.tradingSystem = null;

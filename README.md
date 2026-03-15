@@ -36,6 +36,7 @@ The system requires at least 210 candles for the 200-period moving average. With
 ## API keys
 
 - `GEMINI_API_KEY` (optional, enables AI-powered signal analysis with Google Gemini)
+- `GEMINI_MODEL` (optional, Gemini model to use, defaults to `gemini-2.0-flash`)
 - `POLYGON_API_KEY` (optional, for US stocks market data)
 - `NEWS_API_KEY` (optional, else mock sentiment)
 - `ZERODHA_API_KEY` and `ZERODHA_ACCESS_TOKEN` (required only in `TRADING_MODE=live`)
