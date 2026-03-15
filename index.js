@@ -18,6 +18,7 @@ async function main() {
 
   const agent = new Agent({
     geminiApiKey: env.geminiApiKey,
+    model: env.geminiModel,
     httpPort: env.agentHttpPort,
   });
 
