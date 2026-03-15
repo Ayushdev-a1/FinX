@@ -16,6 +16,7 @@ This project is a production-style scaffold for automated trading with these lay
 
 ```bash
 cp .env.example .env
+npm test
 npm start
 ```
 
@@ -40,6 +41,12 @@ Note: Polygon.io only supports US stock exchanges. For Indian stocks, the system
 
 ```bash
 npm run backtest:sample
+```
+
+## Run smoke tests
+
+```bash
+npm test
 ```
 
 ## Project structure
