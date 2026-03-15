@@ -26,6 +26,69 @@ export class TradingSystem {
     this.monitor = new Monitor();
     this.lastPrices = new Map();
     this.timer = null;
+    this.isWarmedUp = false;
+    this.symbolsWarmedUp = new Set(); // Track per-symbol warm-up status
+  }
+
+  /**
+   * Bootstrap the system with historical data so indicators can compute immediately.
+   * Fetches historical candles and pre-populates the data pipeline.
+   */
+  async bootstrap() {
+    logger.info("Bootstrapping historical data for indicators...");
+
+    try {
+      const historicalCandles = await this.marketData.getHistoricalCandles();
+
+      for (const [symbol, candles] of historicalCandles.entries()) {
+        if (candles.length === 0) {
+          logger.warn(`No historical candles for ${symbol}, indicators will need warm-up time`);
+          continue;
+        }
+
+        // Convert candles to ticks and append to history
+        const ticks = candles.map((c) => ({
+          symbol,
+          timestamp: c.timestamp,
+          price: c.close,
+          bid: c.low,
+          ask: c.high,
+          volume: c.volume,
+        }));
+
+        this.pipeline.appendHistory(ticks);
+
+        // Set last price from most recent candle
+        const lastCandle = candles[candles.length - 1];
+        this.lastPrices.set(symbol, lastCandle.close);
+
+        logger.info(`Bootstrapped ${candles.length} candles for ${symbol}`);
+      }
+
+      // Check if we have enough data for trading
+      const readySymbols = [];
+      const warmingSymbols = [];
+
+      for (const symbol of this.env.symbols) {
+        const candleCount = this.pipeline.computeOhlc(symbol, 60_000, 300).length;
+        if (candleCount >= 210) {
+          readySymbols.push(symbol);
+        } else {
+          warmingSymbols.push(`${symbol} (${candleCount}/210 candles)`);
+        }
+      }
+
+      if (readySymbols.length > 0) {
+        this.isWarmedUp = true;
+        logger.info(`Ready to trade: ${readySymbols.join(", ")}`);
+      }
+
+      if (warmingSymbols.length > 0) {
+        logger.warn(`Still warming up: ${warmingSymbols.join(", ")}`);
+      }
+    } catch (err) {
+      logger.error("Bootstrap failed, system will warm up gradually:", err?.message || err);
+    }
   }
 
   async cycle() {
@@ -40,7 +103,24 @@ export class TradingSystem {
     for (const tick of ticks) {
       this.lastPrices.set(tick.symbol, tick.price);
       const candles = this.pipeline.computeOhlc(tick.symbol, 60_000, 300);
-      if (candles.length < 210) continue;
+      if (candles.length < 210) {
+        // Log warming status once per symbol (not every cycle)
+        if (!this.symbolsWarmedUp.has(tick.symbol)) {
+          logger.info(`Warming up: ${tick.symbol} has ${candles.length}/210 candles needed for indicators`);
+        }
+        continue;
+      }
+
+      // Mark this symbol as warmed up (log only once per symbol)
+      if (!this.symbolsWarmedUp.has(tick.symbol)) {
+        this.symbolsWarmedUp.add(tick.symbol);
+        logger.info(`${tick.symbol} warmed up, now generating trading signals`);
+      }
+
+      // Mark system as warmed up once any symbol is ready
+      if (!this.isWarmedUp) {
+        this.isWarmedUp = true;
+      }
 
       const sentiment = await this.news.getSentiment(tick.symbol);
       const features = buildFeatureVector(candles, sentiment.sentimentScore);
@@ -89,6 +169,9 @@ export class TradingSystem {
       symbols: this.env.symbols,
       pollIntervalMs: this.env.pollIntervalMs,
     });
+
+    // Bootstrap with historical data before starting the trading loop
+    await this.bootstrap();
 
     await this.cycle();
     this.timer = setInterval(async () => {

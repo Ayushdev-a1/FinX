@@ -22,6 +22,17 @@ npm start
 
 The app will ask for missing API keys interactively at startup.
 
+## How It Works
+
+On startup, the system:
+
+1. **Bootstraps historical data** - Fetches 5 days of 1-minute candles from Yahoo Finance (Indian stocks) or Polygon (US stocks) to pre-populate indicators
+2. **Computes indicators** - Calculates MA200, MA50, RSI, MACD, Bollinger Bands, ATR
+3. **Generates signals** - Uses a multi-strategy engine (trend following, mean reversion, momentum, sentiment)
+4. **Executes trades** - In paper mode, simulates fills; in live mode, routes to broker
+
+The system requires at least 210 candles for the 200-period moving average. With historical data bootstrapping, trading can begin immediately on startup.
+
 ## API keys
 
 - `POLYGON_API_KEY` (optional, for US stocks market data)
