@@ -36,7 +36,13 @@ export class Agent {
 
     if (geminiApiKey) {
       this.genAI = new GoogleGenerativeAI(geminiApiKey);
-      this.geminiModel = this.genAI.getGenerativeModel({ model: this.model });
+      this.geminiModel = this.genAI.getGenerativeModel({
+        model: this.model,
+        generationConfig: {
+          maxOutputTokens: 150,
+          temperature: 0.2,
+        },
+      });
       logger.info("Agent: Gemini AI client initialised.");
     } else {
       this.genAI = null;
@@ -105,17 +111,12 @@ export class Agent {
 
     try {
       const response = await Promise.race([
-        this.geminiModel.generateContent({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            maxOutputTokens: 120,
-            temperature: 0.2,
-          },
-        }),
+        this.geminiModel.generateContent(prompt),
         timeout,
       ]);
 
-      const text = response.response?.text()?.trim() || "{}";
+      const responseText = response.response?.text?.() || "";
+      const text = responseText.trim() || "{}";
       // Remove any markdown code block wrappers if present
       const cleanText = text.replace(/^```json\s*|\s*```$/g, "").trim();
       const parsed = JSON.parse(cleanText);
