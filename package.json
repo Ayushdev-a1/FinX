@@ -8,7 +8,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "backtest:sample": "node scripts/sampleBacktest.js"
+    "backtest:sample": "node scripts/sampleBacktest.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js"
   },
   "dependencies": {
     "express": "^5.2.1",
