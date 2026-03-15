@@ -9,9 +9,9 @@ function isIndianSymbol(symbol) {
 }
 
 /**
- * Check if all symbols in the list are Indian stocks.
+ * Check if any symbol in the list is an Indian stock.
  */
-function hasIndianSymbols(symbols) {
+function containsIndianSymbols(symbols) {
   return symbols.some(isIndianSymbol);
 }
 
@@ -143,7 +143,7 @@ export function buildMarketDataProvider(env) {
   
   // For Indian stocks (.NS, .BO), use Yahoo Finance as it supports them
   // Polygon.io does not support Indian stock exchanges
-  if (hasIndianSymbols(symbols)) {
+  if (containsIndianSymbols(symbols)) {
     logger.info("Detected Indian stocks, using Yahoo Finance market data provider.");
     return new YahooFinanceProvider(symbols);
   }
