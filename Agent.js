@@ -245,6 +245,98 @@ Return JSON:
       });
     });
 
+    // Learning system endpoints
+    app.get("/learning", (_, res) => {
+      if (!this.tradingSystem) {
+        return res.status(503).json({ error: "Trading system not attached." });
+      }
+
+      const stats = this.tradingSystem.getLearningStats();
+      res.json(stats);
+    });
+
+    app.get("/learning/trades", (req, res) => {
+      if (!this.tradingSystem) {
+        return res.status(503).json({ error: "Trading system not attached." });
+      }
+
+      const { tradeTracker } = this.tradingSystem;
+      if (!tradeTracker) {
+        return res.json({ enabled: false });
+      }
+
+      const limit = Math.min(Math.max(1, Number(req.query.limit) || 50), 500);
+      const symbol = req.query.symbol || null;
+      const profitable = req.query.profitable === "true" ? true : 
+                        req.query.profitable === "false" ? false : null;
+
+      res.json({
+        openTrades: tradeTracker.getOpenTrades(),
+        closedTrades: tradeTracker.getClosedTrades({ symbol, limit, profitable }),
+        overallStats: tradeTracker.getOverallStats(),
+      });
+    });
+
+    app.get("/learning/symbols", (req, res) => {
+      if (!this.tradingSystem) {
+        return res.status(503).json({ error: "Trading system not attached." });
+      }
+
+      const { learningEngine } = this.tradingSystem;
+      if (!learningEngine) {
+        return res.json({ enabled: false });
+      }
+
+      res.json({
+        recommendations: learningEngine.getSymbolRecommendations(),
+        agentPerformance: learningEngine.getAgentPerformance(),
+      });
+    });
+
+    app.post("/learning/run", (_, res) => {
+      if (!this.tradingSystem) {
+        return res.status(503).json({ error: "Trading system not attached." });
+      }
+
+      const { learningEngine } = this.tradingSystem;
+      if (!learningEngine) {
+        return res.json({ success: false, reason: "Learning engine not enabled." });
+      }
+
+      learningEngine.learn();
+      res.json({ 
+        success: true, 
+        insights: learningEngine.getLearningInsights(),
+      });
+    });
+
+    // Stock picker endpoints
+    app.get("/stocks", async (_, res) => {
+      if (!this.tradingSystem) {
+        return res.status(503).json({ error: "Trading system not attached." });
+      }
+
+      const analysis = await this.tradingSystem.getStockPickerAnalysis();
+      res.json(analysis);
+    });
+
+    app.post("/stocks/refresh", async (_, res) => {
+      if (!this.tradingSystem) {
+        return res.status(503).json({ error: "Trading system not attached." });
+      }
+
+      const { stockPicker } = this.tradingSystem;
+      if (!stockPicker) {
+        return res.json({ success: false, reason: "Stock picker not enabled." });
+      }
+
+      const newSymbols = await stockPicker.refreshCache();
+      res.json({
+        success: true,
+        symbols: newSymbols,
+      });
+    });
+
     this.server = app.listen(this.httpPort, () => {
       logger.info(`Agent HTTP server listening on port ${this.httpPort}`);
     });
