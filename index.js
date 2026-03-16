@@ -17,7 +17,7 @@ async function main() {
   env = getEnv();
 
   const agent = new Agent({
-    geminiApiKey: env.geminiApiKey,
+    apiKey: env.geminiApiKey,
     model: env.geminiModel,
     httpPort: env.agentHttpPort,
   });

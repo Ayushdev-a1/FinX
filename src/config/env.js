@@ -30,7 +30,7 @@ export function getEnv() {
 
     // AI Agent
     geminiApiKey: process.env.GEMINI_API_KEY || "",
-    geminiModel: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+    geminiModel: process.env.GEMINI_MODEL || "llama-3.3-70b-versatile",
     agentHttpPort: process.env.AGENT_HTTP_PORT ? Number(process.env.AGENT_HTTP_PORT) : null,
   };
 }

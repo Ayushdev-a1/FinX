@@ -181,7 +181,22 @@ test("Agent tracks decision history and provides getDecisionHistory", () => {
 
 test("Agent initializes without Gemini API key (AI disabled)", () => {
   const agent = new Agent({ httpPort: null });
-  assert.equal(agent.geminiModel, null);
-  assert.equal(agent.genAI, null);
+  assert.equal(agent.client, null);
   assert.deepEqual(agent.decisionHistory, []);
+});
+
+test("Agent parses JSON wrapped in markdown fences", () => {
+  const agent = new Agent({ httpPort: null });
+  const parsed = agent._parseModelJson("```json\n{\"action\":\"CONFIRM\",\"confidence\":0.8,\"reason\":\"ok\"}\n```");
+  assert.equal(parsed.action, "CONFIRM");
+  assert.equal(parsed.confidence, 0.8);
+});
+
+test("Agent parses JSON when model adds extra prose", () => {
+  const agent = new Agent({ httpPort: null });
+  const parsed = agent._parseModelJson(
+    "Here is my analysis:\n``` \n{\"action\":\"DOWNGRADE\",\"confidence\":0.4,\"reason\":\"mixed\"}\n```"
+  );
+  assert.equal(parsed.action, "DOWNGRADE");
+  assert.equal(parsed.confidence, 0.4);
 });
