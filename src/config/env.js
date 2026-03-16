@@ -24,9 +24,24 @@ export function getEnv() {
     polygonApiKey: process.env.POLYGON_API_KEY || "",
     newsApiKey: process.env.NEWS_API_KEY || "",
 
-    // Broker
-    zerodhaApiKey: process.env.ZERODHA_API_KEY || "",
-    zerodhaAccessToken: process.env.ZERODHA_ACCESS_TOKEN || "",
+    // Broker - Angel One
+    angelOneApiKey: process.env.ANGEL_ONE_API_KEY || "",
+    angelOneClientId: process.env.ANGEL_ONE_CLIENT_ID || "",
+    angelOnePassword: process.env.ANGEL_ONE_PASSWORD || "",
+    angelOneTotpSecret: process.env.ANGEL_ONE_TOTP_SECRET || "",
+    angelOneJwtToken: process.env.ANGEL_ONE_JWT_TOKEN || "",
+    angelOneRefreshToken: process.env.ANGEL_ONE_REFRESH_TOKEN || "",
+
+    // Dynamic stock discovery
+    enableDynamicStockPicker: process.env.ENABLE_DYNAMIC_STOCK_PICKER === "true",
+    stockPickerMinVolume: Number(process.env.STOCK_PICKER_MIN_VOLUME || 500000),
+    stockPickerMinPrice: Number(process.env.STOCK_PICKER_MIN_PRICE || 50),
+    stockPickerMaxPrice: Number(process.env.STOCK_PICKER_MAX_PRICE || 5000),
+    stockPickerMaxStocks: Number(process.env.STOCK_PICKER_MAX_STOCKS || 10),
+
+    // Self-learning system
+    enableSelfLearning: process.env.ENABLE_SELF_LEARNING !== "false",
+    learningDataPath: process.env.LEARNING_DATA_PATH || "./data/learning",
 
     // AI Agent
     geminiApiKey: process.env.GEMINI_API_KEY || "",

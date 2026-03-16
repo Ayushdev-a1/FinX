@@ -83,13 +83,21 @@ test("TradingSystem.cycle processes a paper trade end-to-end", async () => {
     initialCapital: 100_000,
     polygonApiKey: "",
     newsApiKey: "",
-    zerodhaApiKey: "",
-    zerodhaAccessToken: "",
+    angelOneApiKey: "",
+    angelOneClientId: "",
+    angelOneJwtToken: "",
+    angelOneRefreshToken: "",
     geminiApiKey: "",
     agentHttpPort: null,
+    enableDynamicStockPicker: false,
+    enableSelfLearning: false,
+    learningDataPath: "/tmp/learning-test",
   };
 
   const system = new TradingSystem(env);
+  // Initialize the system (this sets up marketData)
+  await system.initialize();
+  
   const baseTs = 1_700_000_000_000;
   const seededTicks = [];
 
@@ -199,4 +207,175 @@ test("Agent parses JSON when model adds extra prose", () => {
   );
   assert.equal(parsed.action, "DOWNGRADE");
   assert.equal(parsed.confidence, 0.4);
+});
+
+// Learning system tests
+import { TradeTracker } from "../src/layers/learning/tradeTracker.js";
+import { LearningEngine } from "../src/layers/learning/learningEngine.js";
+
+test("TradeTracker records entries and exits correctly", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "trade-tracker-"));
+  const tracker = new TradeTracker(tempDir);
+
+  // Record entry
+  const entry = tracker.recordEntry({
+    symbol: "TEST.NS",
+    side: "BUY",
+    qty: 100,
+    price: 500,
+    signal: { direction: "BUY", confidence: 0.7, score: 0.8 },
+    features: { rsi: 45, macd: 0.5 },
+    agentAction: "CONFIRM",
+  });
+
+  assert.equal(entry.symbol, "TEST.NS");
+  assert.equal(entry.side, "BUY");
+  assert.equal(entry.entryQty, 100);
+  assert.equal(entry.entryPrice, 500);
+  assert.equal(entry.status, "OPEN");
+
+  // Verify open trade is tracked
+  const openTrade = tracker.getOpenTrade("TEST.NS");
+  assert.ok(openTrade);
+  assert.equal(openTrade.symbol, "TEST.NS");
+
+  // Record exit (profitable)
+  const exit = tracker.recordExit({
+    symbol: "TEST.NS",
+    exitQty: 100,
+    exitPrice: 550,
+    exitReason: "signal",
+  });
+
+  assert.equal(exit.status, "CLOSED");
+  assert.equal(exit.pnl, 5000); // (550 - 500) * 100
+  assert.equal(exit.profitable, true);
+  assert.ok(exit.pnlPct > 0);
+
+  // Verify trade is closed
+  const closedOpenTrade = tracker.getOpenTrade("TEST.NS");
+  assert.equal(closedOpenTrade, null);
+
+  // Clean up
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test("TradeTracker calculates statistics correctly", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "trade-tracker-stats-"));
+  const tracker = new TradeTracker(tempDir);
+
+  // Create several trades
+  for (let i = 0; i < 10; i++) {
+    tracker.recordEntry({
+      symbol: `TEST${i}.NS`,
+      side: "BUY",
+      qty: 100,
+      price: 100,
+      signal: { direction: "BUY", confidence: 0.6 },
+      features: { rsi: 50 },
+    });
+
+    // Alternate between profit and loss
+    tracker.recordExit({
+      symbol: `TEST${i}.NS`,
+      exitQty: 100,
+      exitPrice: i % 2 === 0 ? 110 : 90,
+      exitReason: "signal",
+    });
+  }
+
+  const stats = tracker.getOverallStats();
+  assert.equal(stats.totalTrades, 10);
+  assert.equal(stats.profitableTrades, 5);
+  assert.equal(stats.losingTrades, 5);
+  assert.equal(stats.winRate, 0.5);
+
+  // Clean up
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test("LearningEngine adjusts signals based on historical performance", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "learning-engine-"));
+  const tracker = new TradeTracker(tempDir);
+  const engine = new LearningEngine(tracker, tempDir);
+
+  // Create enough trades to enable learning (all profitable BUY signals)
+  for (let i = 0; i < 15; i++) {
+    tracker.recordEntry({
+      symbol: `TEST${i}.NS`,
+      side: "BUY",
+      qty: 100,
+      price: 100,
+      signal: { direction: "BUY", confidence: 0.7 },
+      features: { rsi: 45, macd: 0.5, ma50: 100, ma200: 95 },
+    });
+
+    // All trades are profitable
+    tracker.recordExit({
+      symbol: `TEST${i}.NS`,
+      exitQty: 100,
+      exitPrice: 115, // 15% profit
+      exitReason: "signal",
+    });
+  }
+
+  // Run learning
+  engine.learn();
+
+  // Signal should get a confidence boost since BUY signals have been profitable
+  const testSignal = { symbol: "NEW.NS", direction: "BUY", confidence: 0.6, score: 0.5 };
+  const adjustedSignal = engine.adjustSignal(testSignal, { rsi: 45, macd: 0.5 });
+
+  // With all profitable trades, confidence should be boosted
+  assert.ok(adjustedSignal.confidence >= testSignal.confidence);
+
+  // Check insights
+  const insights = engine.getLearningInsights();
+  assert.ok(insights.signalPatterns.length > 0);
+
+  // Clean up
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test("LearningEngine evaluates symbols based on history", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "learning-symbol-"));
+  const tracker = new TradeTracker(tempDir);
+  const engine = new LearningEngine(tracker, tempDir);
+
+  // Create trades for a specific symbol with poor performance
+  for (let i = 0; i < 25; i++) {
+    tracker.recordEntry({
+      symbol: "BADSTOCK.NS",
+      side: "BUY",
+      qty: 100,
+      price: 100,
+      signal: { direction: "BUY", confidence: 0.6 },
+      features: { rsi: 50 },
+    });
+
+    // All trades lose
+    tracker.recordExit({
+      symbol: "BADSTOCK.NS",
+      exitQty: 100,
+      exitPrice: 85, // 15% loss
+      exitReason: "signal",
+    });
+  }
+
+  // Run learning
+  engine.learn();
+
+  // Evaluate the poor performing symbol
+  const evaluation = engine.evaluateSymbol("BADSTOCK.NS");
+  assert.equal(evaluation.tradeable, false);
+  assert.equal(evaluation.reason, "poor_historical_performance");
+  assert.ok(evaluation.winRate < 0.3);
+
+  // New symbol should be tradeable (no history)
+  const newEvaluation = engine.evaluateSymbol("NEWSTOCK.NS");
+  assert.equal(newEvaluation.tradeable, true);
+  assert.equal(newEvaluation.reason, "insufficient_data");
+
+  // Clean up
+  fs.rmSync(tempDir, { recursive: true, force: true });
 });
